@@ -1,13 +1,4 @@
 #!/bin/sh
 set -eu
 
-if [ "${1:-}" = "remove" ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-  active_units="$(systemctl list-units --type=service --state=active 'abls-agent-sms@*.service' --no-legend --no-pager 2>/dev/null | awk '{print $1}')"
-  if [ -n "$active_units" ]; then
-    for unit in $active_units; do
-      systemctl stop "$unit" >/dev/null 2>&1 || true
-    done
-  fi
-fi
-
 exit 0
