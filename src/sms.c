@@ -52,22 +52,11 @@
  struct ABLS_SMS_VARS *Agent_vars = NULL;
 
 static gchar *Smsg_config_get_string ( gchar *name )
- { gchar *value = NULL;
-   if (Agent && Agent->local_config && Json_has_member ( Agent->local_config, name ))
-    { value = Json_get_string ( Agent->local_config, name );
-      if (value && *value) return(value);
-    }
-   if (Agent && Agent->api_config && Json_has_member ( Agent->api_config, name ))
-    { value = Json_get_string ( Agent->api_config, name ); }
-   return(value);
+ { return ( Agent_config_get_string ( Agent, name ) );
  }
 
 static gint Smsg_config_get_int ( gchar *name )
- { if (Agent && Agent->local_config && Json_has_member ( Agent->local_config, name ))
-    { return(Json_get_int ( Agent->local_config, name )); }
-   if (Agent && Agent->api_config && Json_has_member ( Agent->api_config, name ))
-    { return(Json_get_int ( Agent->api_config, name )); }
-   return(0);
+ { return ( Agent_config_get_int ( Agent, name ) );
  }
 
 static size_t Sms_http_write_cb ( void *contents, size_t size, size_t nmemb, void *userp )
@@ -75,7 +64,7 @@ static size_t Sms_http_write_cb ( void *contents, size_t size, size_t nmemb, voi
    size_t chunk_size = size * nmemb;
    gchar *ptr = g_try_realloc ( buffer->body, buffer->size + chunk_size + 1 );
    if (!ptr)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ALERT, "Realloc failed" );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ALERT, "Realloc failed" );
       return(0);
     }
 
@@ -98,7 +87,7 @@ static JsonNode *Sms_http_request ( gchar *url, JsonNode *json_payload, GSList *
    if (!url) return(NULL);
    curl = curl_easy_init();
    if (!curl)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Request to %s: curl init failed", url );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Request to %s: curl init failed", url );
       return(NULL);
     }
 
@@ -123,7 +112,7 @@ static JsonNode *Sms_http_request ( gchar *url, JsonNode *json_payload, GSList *
    res = curl_easy_perform ( curl );
    curl_easy_getinfo ( curl, CURLINFO_RESPONSE_CODE, &http_code );
    if (res != CURLE_OK)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Request to %s failed: %s", url, curl_easy_strerror(res) );
     }
 
@@ -153,7 +142,7 @@ static gboolean Smsg_get_modem_path ( gchar **modem_path )
 
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       return(FALSE);
@@ -164,7 +153,7 @@ static gboolean Smsg_get_modem_path ( gchar **modem_path )
                                          G_VARIANT_TYPE("(a{oa{sa{sv}}})"), G_DBUS_CALL_FLAGS_NONE,
                                          10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "GetManagedObjects failed (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_object_unref ( system_bus );
@@ -188,7 +177,7 @@ static gboolean Smsg_get_modem_path ( gchar **modem_path )
    g_variant_unref ( reply );
    g_object_unref ( system_bus );
    if (*modem_path == NULL)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "No ModemManager modem with Messaging interface found" );
       return(FALSE);
     }
@@ -206,7 +195,7 @@ static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
    if (!Smsg_get_modem_path ( &modem_path )) return(FALSE);
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_free ( modem_path );
@@ -219,7 +208,7 @@ static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
                                          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE,
                                          10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "Cannot read signal quality (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_object_unref ( system_bus );
@@ -235,7 +224,7 @@ static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
    else if ( g_variant_is_of_type ( value, G_VARIANT_TYPE_UINT32 ) )
     { quality = g_variant_get_uint32 ( value ); }
    else
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "Unsupported SignalQuality type '%s'", g_variant_get_type_string(value) );
       g_variant_unref ( value );
       g_variant_unref ( reply );
@@ -262,11 +251,11 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
    GError *error = NULL;
 
    if (!telephone)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "telephone is missing" );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "telephone is missing" );
       return(FALSE);
     }
    if (!Smsg_get_modem_path ( &modem_path ))
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "No modem available, cannot send SMS to '%s'", telephone );
       return(FALSE);
     }
@@ -275,12 +264,12 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
    if (dls_shortname) g_snprintf ( libelle, sizeof(libelle), "%s: %s", dls_shortname, Json_get_string ( msg, "libelle" ) );
                  else g_snprintf ( libelle, sizeof(libelle), "%s", Json_get_string ( msg, "libelle" ) );
 
-   Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_DEBUG,
+   Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_DEBUG,
          "Try to send to %s (%s)", telephone, libelle );
 
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_free ( modem_path );
@@ -297,7 +286,7 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
                                          G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE,
                                          10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "ModemManager Create failed (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_object_unref ( system_bus );
@@ -314,7 +303,7 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
                                          MM_DBUS_SMS_IFACE, "Send", NULL, NULL,
                                          G_DBUS_CALL_FLAGS_NONE, 10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "Envoi SMS Nok to %s (%s) -> %s", telephone, libelle, error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_object_unref ( system_bus );
@@ -330,7 +319,7 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
                                          G_DBUS_CALL_FLAGS_NONE, 10000, NULL, NULL );
    if (reply) g_variant_unref ( reply );
 
-   Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE,
+   Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
          "Envoi SMS Ok to %s (%s)", telephone, libelle );
    g_object_unref ( system_bus );
    g_free ( modem_path );
@@ -358,7 +347,7 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
    gchar *body;
 
    if (!Smsg_ovh_is_configured())
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "OVH SMS is not configured" );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "OVH SMS is not configured" );
       return;
     }
 
@@ -385,7 +374,7 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
                 Smsg_config_get_string ( "ovh_application_secret" ),
                 Smsg_config_get_string ( "ovh_consumer_key" ),
                 query, body, timestamp );
-   Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_DEBUG, "Sending to OVH : %s", body );
+   Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_DEBUG, "Sending to OVH : %s", body );
 
    mdctx = EVP_MD_CTX_new();
    EVP_DigestInit_ex ( mdctx, EVP_sha1(), NULL );
@@ -419,8 +408,8 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
    Json_unref ( RootNode );
 
    if (http_code != 200)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Status %d", http_code ); }
-   else Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "'%s' sent to '%s'", libelle, telephone );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Status %d", http_code ); }
+   else Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "'%s' sent to '%s'", libelle, telephone );
    if (response) Json_unref ( response );
  }
 
@@ -429,7 +418,7 @@ static void Envoi_sms_freeapi ( JsonNode *msg, JsonNode *user )
    g_snprintf ( libelle_utf8, sizeof(libelle_utf8), "%s: %s", Json_get_string ( msg, "dls_shortname" ), Json_get_string ( msg, "libelle" ) );
    gchar *libelle = g_uri_escape_string ( libelle_utf8, NULL, FALSE );
    if (libelle == NULL)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Convert error for %s. Not sending message.", libelle_utf8 );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Convert error for %s. Not sending message.", libelle_utf8 );
       return;
     }
 
@@ -442,21 +431,21 @@ static void Envoi_sms_freeapi ( JsonNode *msg, JsonNode *user )
    gint http_code = Json_get_int ( response, "http_code" );
    Json_unref ( response );
    if (http_code != 200)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Status %d for '%s' to '%s'",
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Status %d for '%s' to '%s'",
             http_code, libelle_utf8, Json_get_string ( user, "email" ) );
     }
-   else Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "'%s' sent to '%s'", libelle_utf8, Json_get_string ( user, "email" ) );
+   else Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "'%s' sent to '%s'", libelle_utf8, Json_get_string ( user, "email" ) );
  }
 
 static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
  { if (Agent_vars->sending_is_disabled == TRUE)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "Sending is disabled. Dropping message" );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending is disabled. Dropping message" );
       return;
     }
 
    JsonNode *UsersNode = Http_Get_from_global_API ( Agent, "/run/users/wanna_be_notified", NULL );
    if (!UsersNode || Json_get_int ( UsersNode, "http_code" ) != 200)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Could not get USERS from API" );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Could not get USERS from API" );
       if (UsersNode) Json_unref ( UsersNode );
       return;
     }
@@ -469,24 +458,24 @@ static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
     { JsonNode *user = recipients->data;
       gchar *user_phone = Json_get_string ( user, "phone" );
       if (!user_phone)
-       { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+       { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
                "Warning: User %s does not have a phone number", Json_get_string ( user, "email" ) );
        }
       else if (!strlen(user_phone))
-       { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+       { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
                "Warning: User %s has an empty phone number", Json_get_string ( user, "email" ) );
        }
       else switch (notif_sms)
        { case TXT_NOTIF_YES:
               if ( Envoi_sms_gsm ( msg, user_phone ) == FALSE )
-               { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Error sending with GSM" );
+               { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Error sending with GSM" );
                  gchar *free_sms_api_user = Json_get_string ( user, "free_sms_api_user" );
                  if (free_sms_api_user && strlen(free_sms_api_user))
-                  { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_INFO, "Sending with FREE API" );
+                  { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO, "Sending with FREE API" );
                     Envoi_sms_freeapi ( msg, user );
                   }
                  else
-                  { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_INFO, "Sending with OVH" );
+                  { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO, "Sending with OVH" );
                     Envoi_sms_ovh ( msg, user_phone );
                   }
                }
@@ -504,10 +493,10 @@ static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
 static void Smsg_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_sms )
  { JsonNode *RootNode = Json_create();
    if (!RootNode) return;
-   Json_add_string ( RootNode, "tech_id", Agent->agent_tech_id );
+   Json_add_string ( RootNode, "tech_id", Agent_get_tech_id ( Agent ) );
    Json_add_string ( RootNode, "acronyme", acronyme );
    Json_add_string ( RootNode, "libelle", texte );
-   Json_add_string ( RootNode, "dls_shortname", Agent->agent_tech_id );
+   Json_add_string ( RootNode, "dls_shortname", Agent_get_tech_id ( Agent ) );
    Json_add_int ( RootNode, "notif_sms", notif_sms );
    Smsg_send_to_all_authorized_recipients ( RootNode );
    Json_unref ( RootNode );
@@ -525,7 +514,7 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
    JsonNode *MapNode = NULL;
 
    if ( RootNode == NULL )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ALERT, "Memory Error for '%s'", from );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ALERT, "Memory Error for '%s'", from );
       return;
     }
    Json_add_string ( RootNode, "phone", from );
@@ -533,42 +522,42 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
    UserNode = Http_Post_to_global_API ( Agent, "/run/user/can_send_txt_cde", RootNode );
    Json_unref ( RootNode );
    if (!UserNode || Json_get_int ( UserNode, "http_code" ) != 200)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Could not get USER from API for '%s'", from );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Could not get USER from API for '%s'", from );
       goto end;
     }
    if ( !Json_has_member ( UserNode, "email" ) )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "%s is not a known user. Dropping command '%s'...", from, texte );
       goto end;
     }
    if ( !Json_has_member ( UserNode, "can_send_txt_cde" ) || Json_get_bool ( UserNode, "can_send_txt_cde" ) == FALSE )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "%s ('%s') is not allowed to send txt_cde. Dropping command '%s'...",
             from, Json_get_string ( UserNode, "email" ), texte );
       goto end;
     }
 
    if ( !strcasecmp ( texte, "ping" ) )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "Ping received from '%s'. Sending Pong", from );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Ping received from '%s'. Sending Pong", from );
       Envoyer_smsg_gsm_text ( "Pong !" );
       goto end;
     }
    if ( !strcasecmp ( texte, "smsoff" ) )
     { Agent_vars->sending_is_disabled = TRUE;
       Envoyer_smsg_gsm_text ( "Sending SMS is off !" );
-      Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "Sending SMS is DISABLED by '%s'", from );
+      Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending SMS is DISABLED by '%s'", from );
       goto end;
     }
    if ( !strcasecmp ( texte, "smson" ) )
     { Envoyer_smsg_gsm_text ( "Sending SMS is on !" );
-      Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE, "Sending SMS is ENABLED by '%s'", from );
+      Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending SMS is ENABLED by '%s'", from );
       Agent_vars->sending_is_disabled = FALSE;
       goto end;
     }
 
    RootNode = Json_create();
    if ( RootNode == NULL )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "MapNode Error for '%s'", from );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "MapNode Error for '%s'", from );
       goto end;
     }
    Json_add_string ( RootNode, "thread_tech_id", "_COMMAND_TEXT" );
@@ -577,11 +566,11 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
    MapNode = Http_Post_to_global_API ( Agent, "/run/mapping/search_txt", RootNode );
    Json_unref ( RootNode );
    if (!MapNode || Json_get_int ( MapNode, "http_code" ) != 200)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Could not get MAP from API for '%s'", from );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Could not get MAP from API for '%s'", from );
       goto end;
     }
    if ( Json_has_member ( MapNode, "nbr_results" ) == FALSE )
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR, "Error searching database for '%s'", texte );
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Error searching database for '%s'", texte );
       Envoyer_smsg_gsm_text ( "Error searching Database .. Sorry .." );
       goto end;
     }
@@ -600,7 +589,7 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
             gchar *tech_id = Json_get_string ( element, "tech_id" );
             gchar *acronyme = Json_get_string ( element, "acronyme" );
             gchar *libelle = Json_get_string ( element, "libelle" );
-            Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_INFO,
+            Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO,
                   "From '%s' map found for '%s' -> '%s:%s' - %s", from, thread_acronyme, tech_id, acronyme, libelle );
             Envoyer_smsg_gsm_text ( thread_acronyme );
           }
@@ -611,7 +600,7 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
          gchar *tech_id = Json_get_string ( element, "tech_id" );
          gchar *acronyme = Json_get_string ( element, "acronyme" );
          gchar *libelle = Json_get_string ( element, "libelle" );
-         Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_INFO,
+         Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO,
                "From '%s' map found for '%s' (%s) -> '%s:%s' - %s",
                from, Json_get_string ( UserNode, "email" ), thread_acronyme, tech_id, acronyme, libelle );
          Mqtt_Send_DI_pulse ( Agent, tech_id, acronyme );
@@ -638,7 +627,7 @@ static GVariant *Smsg_sms_get_property ( GDBusConnection *system_bus, gchar *sms
                                          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE,
                                          10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Cannot read SMS property '%s' (%s)", property, error ? error->message : "unknown" );
       g_clear_error ( &error );
       return(NULL);
@@ -659,7 +648,7 @@ static gboolean Lire_sms_gsm ( void )
    if (!Smsg_get_modem_path ( &modem_path )) return(FALSE);
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_ERR,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_free ( modem_path );
@@ -671,7 +660,7 @@ static gboolean Lire_sms_gsm ( void )
                                          G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE,
                                          10000, NULL, &error );
    if (!reply)
-    { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_WARNING,
+    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
             "Cannot list SMS (%s)", error ? error->message : "unknown" );
       g_clear_error ( &error );
       g_object_unref ( system_bus );
@@ -692,7 +681,7 @@ static gboolean Lire_sms_gsm ( void )
          if (number_v && text_v)
           { const gchar *from = g_variant_get_string ( number_v, NULL );
             const gchar *texte = g_variant_get_string ( text_v, NULL );
-            Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE,
+            Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
                   "Recu '%s' from '%s' via %s", texte, from, sms_path );
             Traiter_commande_sms ( (gchar *)from, (gchar *)texte );
           }
@@ -722,13 +711,13 @@ gint main ( gint argc, gchar *argv[] )
    Config_add_parameter ( "read-interval",          "TOP",     "SMS modem polling interval in deciseconds", CONFIG_INT );
 
    Agent = Agent_init ( argv[0], "sms", ABLS_AGENT_SMS_VERSION, sizeof(struct ABLS_SMS_VARS), argc, argv );
-   Agent_vars = Agent->vars;
+   Agent_vars = Agent_get_vars ( Agent );
 
    Agent_vars->sending_is_disabled = FALSE;
    Agent_vars->ci_nbr_sms = Mnemo_create_CI ( Agent, "NBR_SMS", "Nombre de SMS envoyes", "sms", AGENT_ARCHIVE_1_HEURE );
    Agent_vars->ai_signal_quality = Mnemo_create_AI ( Agent, "SIGNAL_QUALITY", "Qualite du signal", "%", AGENT_ARCHIVE_1_HEURE );
 
-   Mqtt_subscribe ( Agent->mqtt_local, "SEND_SMS" );
+   Agent_subscribe_mqtt_local ( Agent, "SEND_SMS" );
 
    Agent_is_ready ( Agent );
    Envoyer_smsg_gsm_text ( "SMS System is running" );
@@ -737,7 +726,7 @@ gint main ( gint argc, gchar *argv[] )
   guint read_interval = Smsg_config_get_int ( "read_interval" );
    if (read_interval <= 0) read_interval = SMS_DEFAULT_READ_INTERVAL;
 
-   while (Agent->Agent_run == AGENT_IS_RUNNING)
+   while (Agent_is_running ( Agent ))
     { Agent_loop ( Agent );
 
       JsonNode *mqtt_local_message;
@@ -747,7 +736,7 @@ gint main ( gint argc, gchar *argv[] )
                Json_has_member ( mqtt_local_message, "tech_id" ) &&
                Json_has_member ( mqtt_local_message, "acronyme" ) &&
                Json_has_member ( mqtt_local_message, "libelle" ) )
-          { Info( __func__, Agent->agent_classe, Agent->agent_tech_id, LOG_NOTICE,
+          { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
                   "Sending msg '%s:%s' (%s)",
                   Json_get_string ( mqtt_local_message, "tech_id" ),
                   Json_get_string ( mqtt_local_message, "acronyme" ),
@@ -759,7 +748,7 @@ gint main ( gint argc, gchar *argv[] )
 
       JsonNode *mqtt_api_message;
       while ( (mqtt_api_message = Agent_get_mqtt_api_message ( Agent ) ) != NULL )
-       { if ( Mqtt_topic_is ( mqtt_api_message, 4, "+", "AGENT", Agent->agent_tech_id, "TEST" ) )
+       { if ( Mqtt_topic_is ( mqtt_api_message, 4, "+", "AGENT", Agent_get_tech_id ( Agent ), "TEST" ) )
           { gchar *test_mode = Json_get_string ( mqtt_api_message, "test_mode" );
             if (test_mode && !strcasecmp ( test_mode, "OVH" )) Envoyer_smsg_ovh_text ( "Test SMS OVH OK !" );
             else Envoyer_smsg_gsm_text ( "Test SMS GSM OK !" );
@@ -767,7 +756,7 @@ gint main ( gint argc, gchar *argv[] )
          Json_unref ( mqtt_api_message );
        }
 
-      if (Agent->Top < next_read) continue;
+      if (Agent_get_top ( Agent ) < next_read) continue;
 
       gdouble signal_quality;
       if (Smsg_get_signal_quality ( &signal_quality ))
@@ -777,7 +766,7 @@ gint main ( gint argc, gchar *argv[] )
        }
       else Agent_send_comm_to_master ( Agent, FALSE );
 
-      next_read = Agent->Top + read_interval;
+      next_read = Agent_get_top ( Agent ) + read_interval;
     }
 
    g_clear_pointer ( &Agent_vars->mm_modem_path, g_free );
