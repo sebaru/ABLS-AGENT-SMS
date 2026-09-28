@@ -345,10 +345,10 @@ static gboolean Sms_send_gsm ( JsonNode *msg, gchar *telephone )
 /* Sortie: TRUE si la configuration OVH est complete                                                                          */
 /******************************************************************************************************************************/
 static gboolean Sms_ovh_is_configured ( void )
- { gchar *ovh_service_name = Agent_config_get_string ( "ovh_service_name" );
-   gchar *ovh_application_key = Agent_config_get_string ( "ovh_application_key" );
-   gchar *ovh_application_secret = Agent_config_get_string ( "ovh_application_secret" );
-   gchar *ovh_consumer_key = Agent_config_get_string ( "ovh_consumer_key" );
+ { gchar *ovh_service_name = Agent_config_get_string ( Agent, "ovh_service_name" );
+   gchar *ovh_application_key = Agent_config_get_string ( Agent, "ovh_application_key" );
+   gchar *ovh_application_secret = Agent_config_get_string ( Agent, "ovh_application_secret" );
+   gchar *ovh_consumer_key = Agent_config_get_string ( Agent, "ovh_consumer_key" );
    return(ovh_service_name && *ovh_service_name &&
           ovh_application_key && *ovh_application_key &&
           ovh_application_secret && *ovh_application_secret &&
@@ -386,14 +386,14 @@ static void Sms_send_ovh ( JsonNode *msg, gchar *telephone )
    g_snprintf ( libelle, sizeof(libelle), "%s: %s", Json_get_string ( msg, "dls_shortname" ), Json_get_string ( msg, "libelle" ) );
    Json_add_string ( RootNode, "message", libelle );
 
-  g_snprintf ( query, sizeof(query), "https://eu.api.ovh.com/1.0/sms/%s/jobs", Agent_config_get_string ( "ovh_service_name" ) );
+   g_snprintf ( query, sizeof(query), "https://eu.api.ovh.com/1.0/sms/%s/jobs", Agent_config_get_string ( Agent, "ovh_service_name" ) );
    gchar timestamp[20];
    g_snprintf ( timestamp, sizeof(timestamp), "%ld", time(NULL) );
 
    body = Json_to_string ( RootNode );
    g_snprintf ( clair, sizeof(clair), "%s+%s+POST+%s+%s+%s",
-                Agent_config_get_string ( "ovh_application_secret" ),
-                Agent_config_get_string ( "ovh_consumer_key" ),
+                Agent_config_get_string ( Agent, "ovh_application_secret" ),
+                Agent_config_get_string ( Agent, "ovh_consumer_key" ),
                 query, body, timestamp );
    Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_DEBUG, "Sending to OVH : %s", body );
 
@@ -413,9 +413,9 @@ static void Sms_send_ovh ( JsonNode *msg, gchar *telephone )
 
    gchar header[256];
    GSList *liste = NULL;
-  g_snprintf ( header, sizeof(header), "X-Ovh-Application: %s", Agent_config_get_string ( "ovh_application_key" ) );
+   g_snprintf ( header, sizeof(header), "X-Ovh-Application: %s", Agent_config_get_string ( Agent, "ovh_application_key" ) );
    liste = g_slist_append ( liste, g_strdup(header) );
-  g_snprintf ( header, sizeof(header), "X-Ovh-Consumer: %s", Agent_config_get_string ( "ovh_consumer_key" ) );
+   g_snprintf ( header, sizeof(header), "X-Ovh-Consumer: %s", Agent_config_get_string ( Agent, "ovh_consumer_key" ) );
    liste = g_slist_append ( liste, g_strdup(header) );
    g_snprintf ( header, sizeof(header), "X-Ovh-Signature: %s", signature );
    liste = g_slist_append ( liste, g_strdup(header) );
@@ -423,7 +423,7 @@ static void Sms_send_ovh ( JsonNode *msg, gchar *telephone )
    liste = g_slist_append ( liste, g_strdup(header) );
 
    response = Sms_http_request ( query, RootNode, liste );
-   gint http_code = Json_get_int ( response, "http_code" );
+   gint http_code = ( response ? Json_get_int ( response, "http_code" ) : 0 );
    g_slist_free_full ( liste, g_free );
    g_free ( body );
    Json_unref ( RootNode );
@@ -453,9 +453,9 @@ static void Sms_send_freeapi ( JsonNode *msg, JsonNode *user )
                 Json_get_string ( user, "free_sms_api_user" ), Json_get_string ( user, "free_sms_api_key" ), libelle );
    g_free ( libelle );
 
-  JsonNode *response = Sms_http_request ( target_uri, NULL, NULL );
-   gint http_code = Json_get_int ( response, "http_code" );
-   Json_unref ( response );
+   JsonNode *response = Http_Get_external ( Agent, target_uri );
+   gint http_code = ( response ? Json_get_int ( response, "http_code" ) : 0 );
+   if (response) Json_unref ( response );
    if (http_code != 200)
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Status %d for '%s' to '%s'",
             http_code, libelle_utf8, Json_get_string ( user, "email" ) );
@@ -788,8 +788,8 @@ gint main ( gint argc, gchar *argv[] )
    Agent_is_ready ( Agent );
    Sms_send_gsm_text ( "SMS System is running" );
 
-  guint next_read = 0;
-  guint read_interval = Agent_config_get_int ( "read_interval" );
+   guint next_read = 0;
+   guint read_interval = Agent_config_get_int ( Agent, "read_interval" );
    if (read_interval <= 0) read_interval = SMS_DEFAULT_READ_INTERVAL;
 
    while (Agent_is_running ( Agent ))
