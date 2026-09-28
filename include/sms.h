@@ -1,5 +1,5 @@
 /******************************************************************************************************************************/
-/* ABLS-AGENT-SMS/include/sms.h   Déclaration structure interne du module SMS                                                */
+/* ABLS-AGENT-SMS/include/sms.h            Declaration de la structure interne de l'agent SMS                                 */
 /* Projet Abls-Habitat                   Gestion d'habitat                                                15.09.2026 12:00:00 */
 /* Auteur: LEFEVRE Sebastien                                                                                                  */
 /******************************************************************************************************************************/

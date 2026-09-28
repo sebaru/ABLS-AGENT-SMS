@@ -1,5 +1,5 @@
 /******************************************************************************************************************************/
-/* ABLS-AGENT-SMS/sms.c  Gestion de l'agent SMS                                                                              */
+/* ABLS-AGENT-SMS/src/sms.c                Gestion de l'agent SMS via ModemManager, OVH et Free Mobile                        */
 /* Projet Abls-Habitat                   Gestion d'habitat                                                15.09.2026 12:00:00 */
 /* Auteur: LEFEVRE Sebastien                                                                                                  */
 /******************************************************************************************************************************/
@@ -51,14 +51,11 @@
  struct ABLS_AGENT *Agent = NULL;
  struct ABLS_SMS_VARS *Agent_vars = NULL;
 
-static gchar *Smsg_config_get_string ( gchar *name )
- { return ( Agent_config_get_string ( Agent, name ) );
- }
-
-static gint Smsg_config_get_int ( gchar *name )
- { return ( Agent_config_get_int ( Agent, name ) );
- }
-
+/******************************************************************************************************************************/
+/* Sms_http_write_cb: Callback CURL d'accumulation du corps de la reponse HTTP                                                */
+/* Entrée: le fragment recu, sa taille et le buffer de destination                                                            */
+/* Sortie: le nombre d'octets traites, 0 en cas d'erreur                                                                      */
+/******************************************************************************************************************************/
 static size_t Sms_http_write_cb ( void *contents, size_t size, size_t nmemb, void *userp )
  { struct SMS_HTTP_BUFFER *buffer = userp;
    size_t chunk_size = size * nmemb;
@@ -74,7 +71,11 @@ static size_t Sms_http_write_cb ( void *contents, size_t size, size_t nmemb, voi
    buffer->body[buffer->size] = 0;
    return(chunk_size);
  }
-
+/******************************************************************************************************************************/
+/* Sms_http_request: Envoie une requete HTTP et recupere la reponse au format Json                                            */
+/* Entrée: l'url, le payload Json (NULL pour un GET) et la liste des entetes                                                  */
+/* Sortie: la reponse Json enrichie de 'http_code', NULL si erreur                                                            */
+/******************************************************************************************************************************/
 static JsonNode *Sms_http_request ( gchar *url, JsonNode *json_payload, GSList *headers )
  { CURL *curl;
    CURLcode res;
@@ -126,8 +127,12 @@ static JsonNode *Sms_http_request ( gchar *url, JsonNode *json_payload, GSList *
    curl_easy_cleanup ( curl );
    return(response);
  }
-
-static gboolean Smsg_get_modem_path ( gchar **modem_path )
+/******************************************************************************************************************************/
+/* Sms_get_modem_path: Recherche le chemin D-Bus du modem ModemManager et le met en cache                                     */
+/* Entrée: l'adresse ou stocker le chemin alloue                                                                              */
+/* Sortie: TRUE si un modem supportant le Messaging a ete trouve                                                              */
+/******************************************************************************************************************************/
+static gboolean Sms_get_modem_path ( gchar **modem_path )
  { GDBusConnection *system_bus;
    GVariant *reply;
    GVariantIter *objects;
@@ -183,8 +188,12 @@ static gboolean Smsg_get_modem_path ( gchar **modem_path )
     }
    return(TRUE);
  }
-
-static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
+/******************************************************************************************************************************/
+/* Sms_get_signal_quality: Lit la qualite du signal GSM du modem                                                              */
+/* Entrée: l'adresse ou stocker la qualite en pourcentage                                                                     */
+/* Sortie: TRUE si la lecture a abouti                                                                                        */
+/******************************************************************************************************************************/
+static gboolean Sms_get_signal_quality ( gdouble *signal_quality )
  { gchar *modem_path = NULL;
    GDBusConnection *system_bus;
    GVariant *reply;
@@ -192,7 +201,7 @@ static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
    GError *error = NULL;
    guint32 quality = 0;
 
-   if (!Smsg_get_modem_path ( &modem_path )) return(FALSE);
+   if (!Sms_get_modem_path ( &modem_path )) return(FALSE);
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
@@ -240,8 +249,12 @@ static gboolean Smsg_get_signal_quality ( gdouble *signal_quality )
    g_free ( modem_path );
    return(TRUE);
  }
-
-static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
+/******************************************************************************************************************************/
+/* Sms_send_gsm: Envoie un SMS via le modem GSM local (ModemManager)                                                          */
+/* Entrée: le message Json et le numero de telephone du destinataire                                                          */
+/* Sortie: TRUE si le SMS a ete envoye                                                                                        */
+/******************************************************************************************************************************/
+static gboolean Sms_send_gsm ( JsonNode *msg, gchar *telephone )
  { GDBusConnection *system_bus;
    gchar *modem_path = NULL;
    gchar *sms_path = NULL;
@@ -254,7 +267,7 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "telephone is missing" );
       return(FALSE);
     }
-   if (!Smsg_get_modem_path ( &modem_path ))
+   if (!Sms_get_modem_path ( &modem_path ))
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
             "No modem available, cannot send SMS to '%s'", telephone );
       return(FALSE);
@@ -326,19 +339,27 @@ static gboolean Envoi_sms_gsm ( JsonNode *msg, gchar *telephone )
    g_free ( sms_path );
    return(TRUE);
  }
-
-static gboolean Smsg_ovh_is_configured ( void )
- { gchar *ovh_service_name = Smsg_config_get_string ( "ovh_service_name" );
-   gchar *ovh_application_key = Smsg_config_get_string ( "ovh_application_key" );
-   gchar *ovh_application_secret = Smsg_config_get_string ( "ovh_application_secret" );
-   gchar *ovh_consumer_key = Smsg_config_get_string ( "ovh_consumer_key" );
+/******************************************************************************************************************************/
+/* Sms_ovh_is_configured: Teste si les parametres de l'API SMS OVH sont tous renseignes                                       */
+/* Entrée: néant                                                                                                              */
+/* Sortie: TRUE si la configuration OVH est complete                                                                          */
+/******************************************************************************************************************************/
+static gboolean Sms_ovh_is_configured ( void )
+ { gchar *ovh_service_name = Agent_config_get_string ( "ovh_service_name" );
+   gchar *ovh_application_key = Agent_config_get_string ( "ovh_application_key" );
+   gchar *ovh_application_secret = Agent_config_get_string ( "ovh_application_secret" );
+   gchar *ovh_consumer_key = Agent_config_get_string ( "ovh_consumer_key" );
    return(ovh_service_name && *ovh_service_name &&
           ovh_application_key && *ovh_application_key &&
           ovh_application_secret && *ovh_application_secret &&
           ovh_consumer_key && *ovh_consumer_key);
  }
-
-static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
+/******************************************************************************************************************************/
+/* Sms_send_ovh: Envoie un SMS via l'API SMS d'OVH                                                                            */
+/* Entrée: le message Json et le numero de telephone du destinataire                                                          */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_ovh ( JsonNode *msg, gchar *telephone )
  { gchar clair[512], hash_string[48], signature[48], query[256];
    unsigned char hash_bin[EVP_MAX_MD_SIZE];
    unsigned int md_len;
@@ -346,7 +367,7 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
    JsonNode *response;
    gchar *body;
 
-   if (!Smsg_ovh_is_configured())
+   if (!Sms_ovh_is_configured())
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "OVH SMS is not configured" );
       return;
     }
@@ -365,14 +386,14 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
    g_snprintf ( libelle, sizeof(libelle), "%s: %s", Json_get_string ( msg, "dls_shortname" ), Json_get_string ( msg, "libelle" ) );
    Json_add_string ( RootNode, "message", libelle );
 
-  g_snprintf ( query, sizeof(query), "https://eu.api.ovh.com/1.0/sms/%s/jobs", Smsg_config_get_string ( "ovh_service_name" ) );
+  g_snprintf ( query, sizeof(query), "https://eu.api.ovh.com/1.0/sms/%s/jobs", Agent_config_get_string ( "ovh_service_name" ) );
    gchar timestamp[20];
    g_snprintf ( timestamp, sizeof(timestamp), "%ld", time(NULL) );
 
    body = Json_to_string ( RootNode );
    g_snprintf ( clair, sizeof(clair), "%s+%s+POST+%s+%s+%s",
-                Smsg_config_get_string ( "ovh_application_secret" ),
-                Smsg_config_get_string ( "ovh_consumer_key" ),
+                Agent_config_get_string ( "ovh_application_secret" ),
+                Agent_config_get_string ( "ovh_consumer_key" ),
                 query, body, timestamp );
    Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_DEBUG, "Sending to OVH : %s", body );
 
@@ -392,9 +413,9 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
 
    gchar header[256];
    GSList *liste = NULL;
-  g_snprintf ( header, sizeof(header), "X-Ovh-Application: %s", Smsg_config_get_string ( "ovh_application_key" ) );
+  g_snprintf ( header, sizeof(header), "X-Ovh-Application: %s", Agent_config_get_string ( "ovh_application_key" ) );
    liste = g_slist_append ( liste, g_strdup(header) );
-  g_snprintf ( header, sizeof(header), "X-Ovh-Consumer: %s", Smsg_config_get_string ( "ovh_consumer_key" ) );
+  g_snprintf ( header, sizeof(header), "X-Ovh-Consumer: %s", Agent_config_get_string ( "ovh_consumer_key" ) );
    liste = g_slist_append ( liste, g_strdup(header) );
    g_snprintf ( header, sizeof(header), "X-Ovh-Signature: %s", signature );
    liste = g_slist_append ( liste, g_strdup(header) );
@@ -413,7 +434,12 @@ static void Envoi_sms_ovh ( JsonNode *msg, gchar *telephone )
    if (response) Json_unref ( response );
  }
 
-static void Envoi_sms_freeapi ( JsonNode *msg, JsonNode *user )
+/******************************************************************************************************************************/
+/* Sms_send_freeapi: Envoie un SMS via l'API Free Mobile de l'utilisateur                                                     */
+/* Entrée: le message Json et l'utilisateur destinataire                                                                      */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_freeapi ( JsonNode *msg, JsonNode *user )
  { gchar libelle_utf8[512];
    g_snprintf ( libelle_utf8, sizeof(libelle_utf8), "%s: %s", Json_get_string ( msg, "dls_shortname" ), Json_get_string ( msg, "libelle" ) );
    gchar *libelle = g_uri_escape_string ( libelle_utf8, NULL, FALSE );
@@ -437,7 +463,12 @@ static void Envoi_sms_freeapi ( JsonNode *msg, JsonNode *user )
    else Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "'%s' sent to '%s'", libelle_utf8, Json_get_string ( user, "email" ) );
  }
 
-static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
+/******************************************************************************************************************************/
+/* Sms_send_to_all_authorized_recipients: Diffuse un message a tous les utilisateurs a notifier                               */
+/* Entrée: le message Json                                                                                                    */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_to_all_authorized_recipients ( JsonNode *msg )
  { if (Agent_vars->sending_is_disabled == TRUE)
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending is disabled. Dropping message" );
       return;
@@ -467,21 +498,21 @@ static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
        }
       else switch (notif_sms)
        { case TXT_NOTIF_YES:
-              if ( Envoi_sms_gsm ( msg, user_phone ) == FALSE )
+              if ( Sms_send_gsm ( msg, user_phone ) == FALSE )
                { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Error sending with GSM" );
                  gchar *free_sms_api_user = Json_get_string ( user, "free_sms_api_user" );
                  if (free_sms_api_user && strlen(free_sms_api_user))
                   { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO, "Sending with FREE API" );
-                    Envoi_sms_freeapi ( msg, user );
+                    Sms_send_freeapi ( msg, user );
                   }
                  else
                   { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO, "Sending with OVH" );
-                    Envoi_sms_ovh ( msg, user_phone );
+                    Sms_send_ovh ( msg, user_phone );
                   }
                }
               break;
          case TXT_NOTIF_OVH_ONLY:
-              Envoi_sms_ovh ( msg, user_phone );
+              Sms_send_ovh ( msg, user_phone );
               break;
        }
     }
@@ -490,7 +521,12 @@ static void Smsg_send_to_all_authorized_recipients ( JsonNode *msg )
    Mqtt_Send_CI_pulse ( Agent, Agent_vars->ci_nbr_sms );
  }
 
-static void Smsg_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_sms )
+/******************************************************************************************************************************/
+/* Sms_send_internal_text: Diffuse un message technique genere par l'agent lui-meme                                           */
+/* Entrée: le texte, l'acronyme associe et le mode de notification                                                            */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_sms )
  { JsonNode *RootNode = Json_create();
    if (!RootNode) return;
    Json_add_string ( RootNode, "tech_id", Agent_get_tech_id ( Agent ) );
@@ -498,17 +534,32 @@ static void Smsg_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_
    Json_add_string ( RootNode, "libelle", texte );
    Json_add_string ( RootNode, "dls_shortname", Agent_get_tech_id ( Agent ) );
    Json_add_int ( RootNode, "notif_sms", notif_sms );
-   Smsg_send_to_all_authorized_recipients ( RootNode );
+   Sms_send_to_all_authorized_recipients ( RootNode );
    Json_unref ( RootNode );
  }
 
-static void Envoyer_smsg_ovh_text ( gchar *texte )
- { Smsg_send_internal_text ( texte, "TEST_OVH", TXT_NOTIF_OVH_ONLY ); }
+/******************************************************************************************************************************/
+/* Sms_send_ovh_text: Diffuse un message technique en forcant l'envoi par OVH                                                 */
+/* Entrée: le texte a envoyer                                                                                                 */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_ovh_text ( gchar *texte )
+ { Sms_send_internal_text ( texte, "TEST_OVH", TXT_NOTIF_OVH_ONLY ); }
 
-static void Envoyer_smsg_gsm_text ( gchar *texte )
- { Smsg_send_internal_text ( texte, "TEST_GSM", TXT_NOTIF_YES ); }
+/******************************************************************************************************************************/
+/* Sms_send_gsm_text: Diffuse un message technique en privilegiant l'envoi par le modem GSM                                   */
+/* Entrée: le texte a envoyer                                                                                                 */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_send_gsm_text ( gchar *texte )
+ { Sms_send_internal_text ( texte, "TEST_GSM", TXT_NOTIF_YES ); }
 
-static void Traiter_commande_sms ( gchar *from, gchar *texte )
+/******************************************************************************************************************************/
+/* Sms_process_command: Traite une commande recue par SMS, apres controle des droits de l'expediteur                          */
+/* Entrée: le numero de l'expediteur et le texte de la commande                                                               */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
+static void Sms_process_command ( gchar *from, gchar *texte )
  { JsonNode *RootNode = Json_create();
    JsonNode *UserNode = NULL;
    JsonNode *MapNode = NULL;
@@ -539,17 +590,17 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
 
    if ( !strcasecmp ( texte, "ping" ) )
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Ping received from '%s'. Sending Pong", from );
-      Envoyer_smsg_gsm_text ( "Pong !" );
+      Sms_send_gsm_text ( "Pong !" );
       goto end;
     }
    if ( !strcasecmp ( texte, "smsoff" ) )
     { Agent_vars->sending_is_disabled = TRUE;
-      Envoyer_smsg_gsm_text ( "Sending SMS is off !" );
+      Sms_send_gsm_text ( "Sending SMS is off !" );
       Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending SMS is DISABLED by '%s'", from );
       goto end;
     }
    if ( !strcasecmp ( texte, "smson" ) )
-    { Envoyer_smsg_gsm_text ( "Sending SMS is on !" );
+    { Sms_send_gsm_text ( "Sending SMS is on !" );
       Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE, "Sending SMS is ENABLED by '%s'", from );
       Agent_vars->sending_is_disabled = FALSE;
       goto end;
@@ -560,8 +611,8 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "MapNode Error for '%s'", from );
       goto end;
     }
-   Json_add_string ( RootNode, "thread_tech_id", "_COMMAND_TEXT" );
-   Json_add_string ( RootNode, "thread_acronyme", texte );
+   Json_add_string ( RootNode, "agent_tech_id", "_COMMAND_TEXT" );
+   Json_add_string ( RootNode, "agent_acronyme", texte );
 
    MapNode = Http_Post_to_global_API ( Agent, "/run/mapping/search_txt", RootNode );
    Json_unref ( RootNode );
@@ -571,42 +622,42 @@ static void Traiter_commande_sms ( gchar *from, gchar *texte )
     }
    if ( Json_has_member ( MapNode, "nbr_results" ) == FALSE )
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Error searching database for '%s'", texte );
-      Envoyer_smsg_gsm_text ( "Error searching Database .. Sorry .." );
+      Sms_send_gsm_text ( "Error searching Database .. Sorry .." );
       goto end;
     }
 
    gint nbr_results = Json_get_int ( MapNode, "nbr_results" );
    if ( nbr_results == 0 )
-    { Envoyer_smsg_gsm_text ( "Je n'ai pas trouve, desole." ); }
+    { Sms_send_gsm_text ( "Je n'ai pas trouve, desole." ); }
    else
-    { if ( nbr_results > 1 ) Envoyer_smsg_gsm_text ( "Aie, plusieurs choix sont possibles ... :" );
+    { if ( nbr_results > 1 ) Sms_send_gsm_text ( "Aie, plusieurs choix sont possibles ... :" );
 
       GList *Results = json_array_get_elements ( Json_get_array ( MapNode, "results" ) );
       if ( nbr_results > 1 )
        { for (GList *results = Results; results; results = g_list_next(results))
           { JsonNode *element = results->data;
-            gchar *thread_acronyme = Json_get_string ( element, "thread_acronyme" );
+            gchar *agent_acronyme = Json_get_string ( element, "agent_acronyme" );
             gchar *tech_id = Json_get_string ( element, "tech_id" );
             gchar *acronyme = Json_get_string ( element, "acronyme" );
             gchar *libelle = Json_get_string ( element, "libelle" );
             Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO,
-                  "From '%s' map found for '%s' -> '%s:%s' - %s", from, thread_acronyme, tech_id, acronyme, libelle );
-            Envoyer_smsg_gsm_text ( thread_acronyme );
+                  "From '%s' map found for '%s' -> '%s:%s' - %s", from, agent_acronyme, tech_id, acronyme, libelle );
+            Sms_send_gsm_text ( agent_acronyme );
           }
        }
       else
        { JsonNode *element = Results->data;
-         gchar *thread_acronyme = Json_get_string ( element, "thread_acronyme" );
+         gchar *agent_acronyme = Json_get_string ( element, "agent_acronyme" );
          gchar *tech_id = Json_get_string ( element, "tech_id" );
          gchar *acronyme = Json_get_string ( element, "acronyme" );
          gchar *libelle = Json_get_string ( element, "libelle" );
          Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_INFO,
                "From '%s' map found for '%s' (%s) -> '%s:%s' - %s",
-               from, Json_get_string ( UserNode, "email" ), thread_acronyme, tech_id, acronyme, libelle );
+               from, Json_get_string ( UserNode, "email" ), agent_acronyme, tech_id, acronyme, libelle );
          Mqtt_Send_DI_pulse ( Agent, tech_id, acronyme );
          gchar chaine[256];
          g_snprintf ( chaine, sizeof(chaine), "'%s' fait.", texte );
-         Envoyer_smsg_gsm_text ( chaine );
+         Sms_send_gsm_text ( chaine );
        }
       g_list_free ( Results );
     }
@@ -616,7 +667,12 @@ end:
    if (UserNode) Json_unref ( UserNode );
  }
 
-static GVariant *Smsg_sms_get_property ( GDBusConnection *system_bus, gchar *sms_path, gchar *property )
+/******************************************************************************************************************************/
+/* Sms_get_property: Lit une propriete D-Bus d'un objet SMS de ModemManager                                                   */
+/* Entrée: la connexion au bus systeme, le chemin de l'objet SMS et le nom de la propriete                                    */
+/* Sortie: la valeur de la propriete, NULL si erreur                                                                          */
+/******************************************************************************************************************************/
+static GVariant *Sms_get_property ( GDBusConnection *system_bus, gchar *sms_path, gchar *property )
  { GError *error = NULL;
    GVariant *reply;
    GVariant *value;
@@ -637,7 +693,12 @@ static GVariant *Smsg_sms_get_property ( GDBusConnection *system_bus, gchar *sms
    return(value);
  }
 
-static gboolean Lire_sms_gsm ( void )
+/******************************************************************************************************************************/
+/* Sms_read_gsm: Lit les SMS recus par le modem, les traite puis les supprime                                                 */
+/* Entrée: néant                                                                                                              */
+/* Sortie: TRUE si la liste des SMS a pu etre parcourue                                                                       */
+/******************************************************************************************************************************/
+static gboolean Sms_read_gsm ( void )
  { GDBusConnection *system_bus;
    gchar *modem_path = NULL;
    GError *error = NULL;
@@ -645,7 +706,7 @@ static gboolean Lire_sms_gsm ( void )
    GVariantIter *sms_iter;
    const gchar *sms_path;
 
-   if (!Smsg_get_modem_path ( &modem_path )) return(FALSE);
+   if (!Sms_get_modem_path ( &modem_path )) return(FALSE);
    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
    if (!system_bus)
     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
@@ -670,20 +731,20 @@ static gboolean Lire_sms_gsm ( void )
 
    g_variant_get ( reply, "(ao)", &sms_iter );
    while ( g_variant_iter_next ( sms_iter, "&o", &sms_path ) )
-    { GVariant *state_v = Smsg_sms_get_property ( system_bus, (gchar *)sms_path, "State" );
+    { GVariant *state_v = Sms_get_property ( system_bus, (gchar *)sms_path, "State" );
       if (!state_v) continue;
       guint32 state = g_variant_get_uint32 ( state_v );
       g_variant_unref ( state_v );
 
       if (state == MM_SMS_STATE_RECEIVED)
-       { GVariant *number_v = Smsg_sms_get_property ( system_bus, (gchar *)sms_path, "Number" );
-         GVariant *text_v = Smsg_sms_get_property ( system_bus, (gchar *)sms_path, "Text" );
+       { GVariant *number_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Number" );
+         GVariant *text_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Text" );
          if (number_v && text_v)
           { const gchar *from = g_variant_get_string ( number_v, NULL );
             const gchar *texte = g_variant_get_string ( text_v, NULL );
             Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
                   "Recu '%s' from '%s' via %s", texte, from, sms_path );
-            Traiter_commande_sms ( (gchar *)from, (gchar *)texte );
+            Sms_process_command ( (gchar *)from, (gchar *)texte );
           }
          if (number_v) g_variant_unref ( number_v );
          if (text_v) g_variant_unref ( text_v );
@@ -703,6 +764,11 @@ static gboolean Lire_sms_gsm ( void )
    return(TRUE);
  }
 
+/******************************************************************************************************************************/
+/* main: Point d'entree de l'agent SMS                                                                                        */
+/* Entrée: les parametres de la ligne de commande                                                                             */
+/* Sortie: néant                                                                                                              */
+/******************************************************************************************************************************/
 gint main ( gint argc, gchar *argv[] )
  { Config_add_parameter ( "ovh-service-name",       "SERVICE", "OVH SMS service name", CONFIG_STRING );
    Config_add_parameter ( "ovh-application-key",    "KEY",     "OVH application key", CONFIG_STRING );
@@ -720,10 +786,10 @@ gint main ( gint argc, gchar *argv[] )
    Agent_subscribe_mqtt_local ( Agent, "SEND_SMS" );
 
    Agent_is_ready ( Agent );
-   Envoyer_smsg_gsm_text ( "SMS System is running" );
+   Sms_send_gsm_text ( "SMS System is running" );
 
   guint next_read = 0;
-  guint read_interval = Smsg_config_get_int ( "read_interval" );
+  guint read_interval = Agent_config_get_int ( "read_interval" );
    if (read_interval <= 0) read_interval = SMS_DEFAULT_READ_INTERVAL;
 
    while (Agent_is_running ( Agent ))
@@ -741,7 +807,7 @@ gint main ( gint argc, gchar *argv[] )
                   Json_get_string ( mqtt_local_message, "tech_id" ),
                   Json_get_string ( mqtt_local_message, "acronyme" ),
                   Json_get_string ( mqtt_local_message, "libelle" ) );
-            Smsg_send_to_all_authorized_recipients ( mqtt_local_message );
+            Sms_send_to_all_authorized_recipients ( mqtt_local_message );
           }
          Json_unref ( mqtt_local_message );
        }
@@ -750,8 +816,8 @@ gint main ( gint argc, gchar *argv[] )
       while ( (mqtt_api_message = Agent_get_mqtt_api_message ( Agent ) ) != NULL )
        { if ( Mqtt_topic_is ( mqtt_api_message, 4, "+", "AGENT", Agent_get_tech_id ( Agent ), "TEST" ) )
           { gchar *test_mode = Json_get_string ( mqtt_api_message, "test_mode" );
-            if (test_mode && !strcasecmp ( test_mode, "OVH" )) Envoyer_smsg_ovh_text ( "Test SMS OVH OK !" );
-            else Envoyer_smsg_gsm_text ( "Test SMS GSM OK !" );
+            if (test_mode && !strcasecmp ( test_mode, "OVH" )) Sms_send_ovh_text ( "Test SMS OVH OK !" );
+            else Sms_send_gsm_text ( "Test SMS GSM OK !" );
           }
          Json_unref ( mqtt_api_message );
        }
@@ -759,10 +825,10 @@ gint main ( gint argc, gchar *argv[] )
       if (Agent_get_top ( Agent ) < next_read) continue;
 
       gdouble signal_quality;
-      if (Smsg_get_signal_quality ( &signal_quality ))
+      if (Sms_get_signal_quality ( &signal_quality ))
        { Agent_send_comm_to_master ( Agent, TRUE );
          Mqtt_Send_AI ( Agent, Agent_vars->ai_signal_quality, signal_quality, TRUE );
-         Lire_sms_gsm();
+         Sms_read_gsm();
        }
       else Agent_send_comm_to_master ( Agent, FALSE );
 
