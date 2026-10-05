@@ -780,8 +780,8 @@ gint main ( gint argc, gchar *argv[] )
    Agent_vars = Agent_get_vars ( Agent );
 
    Agent_vars->sending_is_disabled = FALSE;
-   Agent_vars->ci_nbr_sms = Mnemo_create_CI ( Agent, "NBR_SMS", "Nombre de SMS envoyes", "sms", AGENT_ARCHIVE_1_HEURE );
-   Agent_vars->ai_signal_quality = Mnemo_create_AI ( Agent, "SIGNAL_QUALITY", "Qualite du signal", "%", AGENT_ARCHIVE_1_HEURE );
+   Agent_vars->ci_nbr_sms          = Mnemo_create_CI ( Agent, "NBR_SMS", "Nombre de SMS envoyes", "sms", AGENT_ARCHIVE_1_HEURE );
+   Agent_vars->ai_signal_quality   = Mnemo_create_AI ( Agent, "SIGNAL_QUALITY", "Qualite du signal", "%", AGENT_ARCHIVE_1_HEURE );
 
    Agent_subscribe_mqtt_local ( Agent, "SEND_SMS" );
 
