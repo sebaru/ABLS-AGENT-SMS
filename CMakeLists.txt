@@ -73,6 +73,11 @@ install(TARGETS abls-agent-sms
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
 )
 
+install(FILES abls-agent-sms@tech_id.conf.template
+  DESTINATION /etc/abls
+  COMPONENT runtime
+)
+
 execute_process(
   COMMAND pkg-config --variable=systemdsystemunitdir systemd
   OUTPUT_VARIABLE ABLS_SYSTEMD_UNIT_INSTALL_DIR
