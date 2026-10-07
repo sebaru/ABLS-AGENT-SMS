@@ -1,0 +1,18 @@
+{
+  "standalone": true,
+  "master_hostname": "localhost",
+  "mqtt_over_ssl": false,
+  "read_interval": 50,
+  "recipients": [
+    {
+      "email": "recipient@example.com",
+      "phone": "+33600000000",
+      "free_sms_api_user": "",
+      "free_sms_api_key": ""
+    }
+  ],
+  "ovh_service_name": "",
+  "ovh_application_key": "",
+  "ovh_application_secret": "",
+  "ovh_consumer_key": ""
+}

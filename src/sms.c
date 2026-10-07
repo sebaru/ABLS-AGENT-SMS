@@ -474,17 +474,23 @@ static void Sms_send_to_all_authorized_recipients ( JsonNode *msg )
       return;
     }
 
-   JsonNode *UsersNode = Http_Get_from_global_API ( Agent, "/run/users/wanna_be_notified", NULL );
-   if (!UsersNode || Json_get_int ( UsersNode, "http_code" ) != 200)
-    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Could not get USERS from API" );
-      if (UsersNode) Json_unref ( UsersNode );
-      return;
-    }
-
    gint notif_sms = Json_get_int ( msg, "notif_sms" );
    if (notif_sms == TXT_NOTIF_BY_DLS) notif_sms = Json_get_int ( msg, "notif_sms_by_dls" );
 
-   GList *Recipients = json_array_get_elements ( Json_get_array ( UsersNode, "recipients" ) );
+   JsonNode *UsersNode = NULL;
+   GList *Recipients = NULL;
+   if (Agent_config_get_bool ( Agent, "standalone" ) == FALSE )
+    { UsersNode = Http_Get_from_global_API ( Agent, "/run/users/wanna_be_notified", NULL );
+      if (!UsersNode || Json_get_int ( UsersNode, "http_code" ) != 200)
+       { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR, "Could not get USERS from API" );
+         if (UsersNode) Json_unref ( UsersNode );
+         return;
+       }
+      Recipients = json_array_get_elements ( Json_get_array ( UsersNode, "recipients" ) );
+    }
+   else
+    { Recipients = json_array_get_elements ( Agent_config_get_array ( Agent, "recipients" ) ); }
+
    for (GList *recipients = Recipients; recipients; recipients = g_list_next(recipients))
     { JsonNode *user = recipients->data;
       gchar *user_phone = Json_get_string ( user, "phone" );
