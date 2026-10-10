@@ -525,8 +525,8 @@ static void Sms_send_to_all_authorized_recipients ( JsonNode *msg )
    g_list_free ( Recipients );
    Json_unref ( UsersNode );
    Mqtt_Send_CI_pulse ( Agent, Agent_vars->ci_nbr_sms );
+   Agent_send_comm_to_master ( Agent, TRUE );
  }
-
 /******************************************************************************************************************************/
 /* Sms_send_internal_text: Diffuse un message technique genere par l'agent lui-meme                                           */
 /* Entrée: le texte, l'acronyme associe et le mode de notification                                                            */
@@ -543,7 +543,6 @@ static void Sms_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_s
    Sms_send_to_all_authorized_recipients ( RootNode );
    Json_unref ( RootNode );
  }
-
 /******************************************************************************************************************************/
 /* Sms_send_ovh_text: Diffuse un message technique en forcant l'envoi par OVH                                                 */
 /* Entrée: le texte a envoyer                                                                                                 */
@@ -551,7 +550,6 @@ static void Sms_send_internal_text ( gchar *texte, gchar *acronyme, gint notif_s
 /******************************************************************************************************************************/
 static void Sms_send_ovh_text ( gchar *texte )
  { Sms_send_internal_text ( texte, "TEST_OVH", TXT_NOTIF_OVH_ONLY ); }
-
 /******************************************************************************************************************************/
 /* Sms_send_gsm_text: Diffuse un message technique en privilegiant l'envoi par le modem GSM                                   */
 /* Entrée: le texte a envoyer                                                                                                 */
@@ -559,7 +557,6 @@ static void Sms_send_ovh_text ( gchar *texte )
 /******************************************************************************************************************************/
 static void Sms_send_gsm_text ( gchar *texte )
  { Sms_send_internal_text ( texte, "TEST_GSM", TXT_NOTIF_YES ); }
-
 /******************************************************************************************************************************/
 /* Sms_process_command: Traite une commande recue par SMS, apres controle des droits de l'expediteur                          */
 /* Entrée: le numero de l'expediteur et le texte de la commande                                                               */
@@ -678,170 +675,170 @@ end:
 /* Entrée: la connexion au bus systeme, le chemin de l'objet SMS et le nom de la propriete                                    */
 /* Sortie: la valeur de la propriete, NULL si erreur                                                                          */
 /******************************************************************************************************************************/
-static GVariant *Sms_get_property ( GDBusConnection *system_bus, gchar *sms_path, gchar *property )
- { GError *error = NULL;
-   GVariant *reply;
-   GVariant *value;
+ static GVariant *Sms_get_property ( GDBusConnection *system_bus, gchar *sms_path, gchar *property )
+  { GError *error = NULL;
+    GVariant *reply;
+    GVariant *value;
 
-   reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, sms_path,
-                                         MM_DBUS_PROPERTIES_IFACE, "Get",
-                                         g_variant_new ( "(ss)", MM_DBUS_SMS_IFACE, property ),
-                                         G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE,
-                                         10000, NULL, &error );
-   if (!reply)
-    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
-            "Cannot read SMS property '%s' (%s)", property, error ? error->message : "unknown" );
-      g_clear_error ( &error );
-      return(NULL);
-    }
-   g_variant_get ( reply, "(v)", &value );
-   g_variant_unref ( reply );
-   return(value);
- }
+    reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, sms_path,
+                                          MM_DBUS_PROPERTIES_IFACE, "Get",
+                                          g_variant_new ( "(ss)", MM_DBUS_SMS_IFACE, property ),
+                                          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE,
+                                          10000, NULL, &error );
+    if (!reply)
+     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
+             "Cannot read SMS property '%s' (%s)", property, error ? error->message : "unknown" );
+       g_clear_error ( &error );
+       return(NULL);
+     }
+    g_variant_get ( reply, "(v)", &value );
+    g_variant_unref ( reply );
+    return(value);
+  }
 
 /******************************************************************************************************************************/
 /* Sms_read_gsm: Lit les SMS recus par le modem, les traite puis les supprime                                                 */
 /* Entrée: néant                                                                                                              */
 /* Sortie: TRUE si la liste des SMS a pu etre parcourue                                                                       */
 /******************************************************************************************************************************/
-static gboolean Sms_read_gsm ( void )
- { GDBusConnection *system_bus;
-   gchar *modem_path = NULL;
-   GError *error = NULL;
-   GVariant *reply;
-   GVariantIter *sms_iter;
-   const gchar *sms_path;
+ static gboolean Sms_read_gsm ( void )
+  { GDBusConnection *system_bus;
+    gchar *modem_path = NULL;
+    GError *error = NULL;
+    GVariant *reply;
+    GVariantIter *sms_iter;
+    const gchar *sms_path;
 
-   if (!Sms_get_modem_path ( &modem_path )) return(FALSE);
-   system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
-   if (!system_bus)
-    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
-            "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
-      g_clear_error ( &error );
-      g_free ( modem_path );
-      return(FALSE);
-    }
+    if (!Sms_get_modem_path ( &modem_path )) return(FALSE);
+    system_bus = g_bus_get_sync ( G_BUS_TYPE_SYSTEM, NULL, &error );
+    if (!system_bus)
+     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_ERR,
+             "Cannot connect to system D-Bus (%s)", error ? error->message : "unknown" );
+       g_clear_error ( &error );
+       g_free ( modem_path );
+       return(FALSE);
+     }
 
-   reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, modem_path,
-                                         MM_DBUS_MESSAGING_IFACE, "List", NULL,
-                                         G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE,
-                                         10000, NULL, &error );
-   if (!reply)
-    { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
-            "Cannot list SMS (%s)", error ? error->message : "unknown" );
-      g_clear_error ( &error );
-      g_object_unref ( system_bus );
-      g_free ( modem_path );
-      return(FALSE);
-    }
+    reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, modem_path,
+                                          MM_DBUS_MESSAGING_IFACE, "List", NULL,
+                                          G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE,
+                                          10000, NULL, &error );
+    if (!reply)
+     { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_WARNING,
+             "Cannot list SMS (%s)", error ? error->message : "unknown" );
+       g_clear_error ( &error );
+       g_object_unref ( system_bus );
+       g_free ( modem_path );
+       return(FALSE);
+     }
 
-   g_variant_get ( reply, "(ao)", &sms_iter );
-   while ( g_variant_iter_next ( sms_iter, "&o", &sms_path ) )
-    { GVariant *state_v = Sms_get_property ( system_bus, (gchar *)sms_path, "State" );
-      if (!state_v) continue;
-      guint32 state = g_variant_get_uint32 ( state_v );
-      g_variant_unref ( state_v );
+    g_variant_get ( reply, "(ao)", &sms_iter );
+    while ( g_variant_iter_next ( sms_iter, "&o", &sms_path ) )
+     { GVariant *state_v = Sms_get_property ( system_bus, (gchar *)sms_path, "State" );
+       if (!state_v) continue;
+       guint32 state = g_variant_get_uint32 ( state_v );
+       g_variant_unref ( state_v );
 
-      if (state == MM_SMS_STATE_RECEIVED)
-       { GVariant *number_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Number" );
-         GVariant *text_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Text" );
-         if (number_v && text_v)
-          { const gchar *from = g_variant_get_string ( number_v, NULL );
-            const gchar *texte = g_variant_get_string ( text_v, NULL );
-            Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
-                  "Recu '%s' from '%s' via %s", texte, from, sms_path );
-            Sms_process_command ( (gchar *)from, (gchar *)texte );
-          }
-         if (number_v) g_variant_unref ( number_v );
-         if (text_v) g_variant_unref ( text_v );
+       if (state == MM_SMS_STATE_RECEIVED)
+        { GVariant *number_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Number" );
+          GVariant *text_v = Sms_get_property ( system_bus, (gchar *)sms_path, "Text" );
+          if (number_v && text_v)
+           { const gchar *from = g_variant_get_string ( number_v, NULL );
+             const gchar *texte = g_variant_get_string ( text_v, NULL );
+             Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
+                   "Recu '%s' from '%s' via %s", texte, from, sms_path );
+             Sms_process_command ( (gchar *)from, (gchar *)texte );
+           }
+          if (number_v) g_variant_unref ( number_v );
+          if (text_v) g_variant_unref ( text_v );
 
-         GVariant *delete_reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, modem_path,
-                                                                 MM_DBUS_MESSAGING_IFACE, "Delete",
-                                                                 g_variant_new ( "(o)", sms_path ), NULL,
-                                                                 G_DBUS_CALL_FLAGS_NONE, 10000, NULL, NULL );
-         if (delete_reply) g_variant_unref ( delete_reply );
-       }
-    }
+          GVariant *delete_reply = g_dbus_connection_call_sync ( system_bus, MM_DBUS_SERVICE, modem_path,
+                                                                  MM_DBUS_MESSAGING_IFACE, "Delete",
+                                                                  g_variant_new ( "(o)", sms_path ), NULL,
+                                                                  G_DBUS_CALL_FLAGS_NONE, 10000, NULL, NULL );
+          if (delete_reply) g_variant_unref ( delete_reply );
+        }
+     }
 
-   g_variant_iter_free ( sms_iter );
-   g_variant_unref ( reply );
-   g_object_unref ( system_bus );
-   g_free ( modem_path );
-   return(TRUE);
- }
-
+    g_variant_iter_free ( sms_iter );
+    g_variant_unref ( reply );
+    g_object_unref ( system_bus );
+    g_free ( modem_path );
+    return(TRUE);
+  }
 /******************************************************************************************************************************/
 /* main: Point d'entree de l'agent SMS                                                                                        */
 /* Entrée: les parametres de la ligne de commande                                                                             */
 /* Sortie: néant                                                                                                              */
 /******************************************************************************************************************************/
-gint main ( gint argc, gchar *argv[] )
- { Config_add_parameter ( "ovh-service-name",       "SERVICE", "OVH SMS service name", CONFIG_STRING );
-   Config_add_parameter ( "ovh-application-key",    "KEY",     "OVH application key", CONFIG_STRING );
-   Config_add_parameter ( "ovh-application-secret", "SECRET",  "OVH application secret", CONFIG_STRING );
-   Config_add_parameter ( "ovh-consumer-key",       "KEY",     "OVH consumer key", CONFIG_STRING );
-   Config_add_parameter ( "read-interval",          "TOP",     "SMS modem polling interval in deciseconds", CONFIG_INT );
+ gint main ( gint argc, gchar *argv[] )
+  { Config_add_parameter ( "ovh-service-name",       "SERVICE", "OVH SMS service name", CONFIG_STRING );
+    Config_add_parameter ( "ovh-application-key",    "KEY",     "OVH application key", CONFIG_STRING );
+    Config_add_parameter ( "ovh-application-secret", "SECRET",  "OVH application secret", CONFIG_STRING );
+    Config_add_parameter ( "ovh-consumer-key",       "KEY",     "OVH consumer key", CONFIG_STRING );
+    Config_add_parameter ( "read-interval",          "TOP",     "SMS modem polling interval in deciseconds", CONFIG_INT );
 
-   Agent = Agent_init ( argv[0], "sms", ABLS_AGENT_SMS_VERSION, sizeof(struct ABLS_SMS_VARS), argc, argv );
-   Agent_vars = Agent_get_vars ( Agent );
+    Agent = Agent_init ( argv[0], "sms", ABLS_AGENT_SMS_VERSION, sizeof(struct ABLS_SMS_VARS), argc, argv );
+    Agent_vars = Agent_get_vars ( Agent );
 
-   Agent_vars->sending_is_disabled = FALSE;
-   Agent_vars->ci_nbr_sms          = Mnemo_create_CI ( Agent, "NBR_SMS", "Nombre de SMS envoyes", "sms", AGENT_ARCHIVE_1_HEURE );
-   Agent_vars->ai_signal_quality   = Mnemo_create_AI ( Agent, "SIGNAL_QUALITY", "Qualite du signal", "%", AGENT_ARCHIVE_1_HEURE );
+    Agent_vars->sending_is_disabled = FALSE;
+    Agent_vars->ci_nbr_sms          = Mnemo_create_CI ( Agent, "NBR_SMS", "Nombre de SMS envoyes", "sms", AGENT_ARCHIVE_1_HEURE );
+    Agent_vars->ai_signal_quality   = Mnemo_create_AI ( Agent, "SIGNAL_QUALITY", "Qualite du signal", "%", AGENT_ARCHIVE_1_HEURE );
 
-   Agent_subscribe_mqtt_local ( Agent, "SEND_SMS" );
+    Agent_subscribe_mqtt_local ( Agent, "SEND_SMS" );
 
-   Agent_is_ready ( Agent );
-   Sms_send_gsm_text ( "SMS System is running" );
+    Agent_is_ready ( Agent );
+    Sms_send_gsm_text ( "SMS System is running" );
 
-   guint next_read = 0;
-   guint read_interval = Agent_config_get_int ( Agent, "read_interval" );
-   if (read_interval <= 0) read_interval = SMS_DEFAULT_READ_INTERVAL;
+    guint next_read = 0;
+    guint read_interval = Agent_config_get_int ( Agent, "read_interval" );
+    if (read_interval <= 0) read_interval = SMS_DEFAULT_READ_INTERVAL;
 
-   while (Agent_is_running ( Agent ))
-    { Agent_loop ( Agent );
+    while (Agent_is_running ( Agent ))
+     { Agent_loop ( Agent );
 
-      JsonNode *mqtt_local_message;
-      while ( (mqtt_local_message = Agent_get_mqtt_local_message ( Agent ) ) != NULL )
-       { if ( Mqtt_topic_is ( mqtt_local_message, 1, "SEND_SMS" ) &&
+       JsonNode *mqtt_local_message;
+       while ( (mqtt_local_message = Agent_get_mqtt_local_message ( Agent ) ) != NULL )
+        { if ( Mqtt_topic_is ( mqtt_local_message, 1, "SEND_SMS" ) &&
                Json_has_member ( mqtt_local_message, "notif_sms" ) &&
                Json_has_member ( mqtt_local_message, "tech_id" ) &&
                Json_has_member ( mqtt_local_message, "acronyme" ) &&
                Json_has_member ( mqtt_local_message, "libelle" ) )
-          { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
-                  "Sending msg '%s:%s' (%s)",
-                  Json_get_string ( mqtt_local_message, "tech_id" ),
-                  Json_get_string ( mqtt_local_message, "acronyme" ),
-                  Json_get_string ( mqtt_local_message, "libelle" ) );
-            Sms_send_to_all_authorized_recipients ( mqtt_local_message );
-          }
-         Json_unref ( mqtt_local_message );
-       }
+           { Info( __func__, Agent_get_classe ( Agent ), Agent_get_tech_id ( Agent ), LOG_NOTICE,
+                   "Sending msg '%s:%s' (%s)",
+                   Json_get_string ( mqtt_local_message, "tech_id" ),
+                   Json_get_string ( mqtt_local_message, "acronyme" ),
+                   Json_get_string ( mqtt_local_message, "libelle" ) );
+             Sms_send_to_all_authorized_recipients ( mqtt_local_message );
+           }
+          Json_unref ( mqtt_local_message );
+        }
 
-      JsonNode *mqtt_api_message;
-      while ( (mqtt_api_message = Agent_get_mqtt_api_message ( Agent ) ) != NULL )
-       { if ( Mqtt_topic_is ( mqtt_api_message, 4, "+", "AGENT", Agent_get_tech_id ( Agent ), "TEST" ) )
-          { gchar *test_mode = Json_get_string ( mqtt_api_message, "test_mode" );
-            if (test_mode && !strcasecmp ( test_mode, "OVH" )) Sms_send_ovh_text ( "Test SMS OVH OK !" );
-            else Sms_send_gsm_text ( "Test SMS GSM OK !" );
-          }
-         Json_unref ( mqtt_api_message );
-       }
+       JsonNode *mqtt_api_message;
+       while ( (mqtt_api_message = Agent_get_mqtt_api_message ( Agent ) ) != NULL )
+        { if ( Mqtt_topic_is ( mqtt_api_message, 4, "+", "AGENT", Agent_get_tech_id ( Agent ), "TEST" ) )
+           { gchar *test_mode = Json_get_string ( mqtt_api_message, "test_mode" );
+             if (test_mode && !strcasecmp ( test_mode, "OVH" )) Sms_send_ovh_text ( "Test SMS OVH OK !" );
+             else Sms_send_gsm_text ( "Test SMS GSM OK !" );
+           }
+          Json_unref ( mqtt_api_message );
+        }
 
-      if (Agent_get_top ( Agent ) < next_read) continue;
+/*--------------------------------------------------------- Lecture SMS ------------------------------------------------------*/
+       if (Agent_get_top ( Agent ) < next_read) continue;
 
-      gdouble signal_quality;
-      if (Sms_get_signal_quality ( &signal_quality ))
-       { Agent_send_comm_to_master ( Agent, TRUE );
-         Mqtt_Send_AI ( Agent, Agent_vars->ai_signal_quality, signal_quality, TRUE );
-         Sms_read_gsm();
-       }
-      else Agent_send_comm_to_master ( Agent, FALSE );
+       gdouble signal_quality;
+       if (Sms_get_signal_quality ( &signal_quality ))
+        { Agent_send_comm_to_master ( Agent, TRUE );
+          Mqtt_Send_AI ( Agent, Agent_vars->ai_signal_quality, signal_quality, TRUE );
+          Sms_read_gsm();
+        }
+       else Agent_send_comm_to_master ( Agent, FALSE );
 
-      next_read = Agent_get_top ( Agent ) + read_interval;
-    }
+       next_read = Agent_get_top ( Agent ) + read_interval;
+     }
 
-   g_clear_pointer ( &Agent_vars->mm_modem_path, g_free );
-   Agent_end ( Agent );
- }
+    g_clear_pointer ( &Agent_vars->mm_modem_path, g_free );
+    Agent_end ( Agent );
+  }
 /*----------------------------------------------------------------------------------------------------------------------------*/
